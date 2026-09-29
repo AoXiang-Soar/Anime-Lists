@@ -1794,6 +1794,9 @@
       pad,
       canvas.height - 34
     );
+    ctx.fillStyle = "#6f7788";
+    ctx.font = "400 13px system-ui, sans-serif";
+    ctx.fillText("github.com/AoXiang-Soar/Anime-Lists", pad, canvas.height - 14);
     try {
       const url = canvas.toDataURL("image/png");
       const a = document.createElement("a");
@@ -1839,7 +1842,7 @@
       state.bits = new Uint8Array((catalog.ids.length + 7) >> 3);
       state.starBits = new Uint8Array((catalog.ids.length + 7) >> 3);
       catalog.ids.forEach((id, i) => state.idx.set(id, i));
-      $("#totalCount").textContent = ` · 共收录 ${catalog.ids.length} 部`;
+      $("#totalCount").textContent = `1990-2026 共收录 ${catalog.ids.length} 部`;
       wire();
       ensureSearchIndex();
       const hash = readHash();

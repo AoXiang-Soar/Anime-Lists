@@ -91,6 +91,39 @@ def main() -> int:
         print("GET /app.js      ->", status, len(js), "bytes")
         status, data = get("/data/2024.js")
         print("GET /data/2024.js->", status, len(data), "bytes")
+
+        # ---- 健康检查与自愈：把解压目录里的首页删掉，服务应当自己修回来
+        status, health = get("/__health")
+        print("GET /__health    ->", status, health)
+        site_index = pathlib.Path(json.loads(health)["site"]) / "index.html"
+        site_index.unlink()
+        status, health2 = get("/__health")
+        print("  删掉 index.html 后 ok =", json.loads(health2)["ok"])
+        status, html = get("/")
+        print("  再次访问首页   ->", status, len(html), "bytes（自愈）")
+        status, health3 = get("/__health")
+        print("  自愈后 ok =", json.loads(health3)["ok"])
+        self_check = site_index.exists()
+        print("  文件已恢复 =", self_check)
+
+        # ---- 复用判断：坏实例不该被复用
+        sys.path.insert(0, str(ROOT / "packaging"))
+        import launcher as launcher_mod  # noqa: E402
+
+        site_index.unlink()
+        found = launcher_mod.find_running()
+        print("坏实例被复用 =", found is not None)
+
+        # ---- /__quit 能让进程退出
+        try:
+            get("/__quit")
+        except Exception:
+            pass
+        for _ in range(30):
+            time.sleep(0.3)
+            if proc.poll() is not None:
+                break
+        print("__quit 后进程已退出 =", proc.poll() is not None)
         return 0
     finally:
         proc.terminate()

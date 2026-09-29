@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import shutil
@@ -34,6 +35,15 @@ PORT_CANDIDATES = (17877, 17878, 17879, 17880)
 IDLE_TIMEOUT = 600  # 秒：页面关闭后多久自动退出
 DATA_FILE = "anime-lists-data.json"
 SAVE_EXTS = {".json", ".png", ".txt"}
+REQUIRED_SITE_FILES = (
+    "index.html",
+    "styles.css",
+    "app.js",
+    "data/index.js",
+    "data/catalog.js",
+    "data/search.js",
+)
+STOP_EVENT = threading.Event()
 
 
 def bundle_root() -> Path:
@@ -57,22 +67,53 @@ def fail(message: str) -> None:
         print(message, file=sys.stderr)
 
 
+def build_id(src: Path | None = None) -> str:
+    """站点文件指纹：exe 一换（页面/数据变了）解压目录就会重建。"""
+    src = src or bundle_root()
+    digest = hashlib.sha256()
+    digest.update(VERSION.encode("utf-8"))
+    for rel in ("index.html", "app.js", "styles.css", "data/index.js", "data/catalog.js"):
+        path = src / rel
+        if path.exists():
+            digest.update(path.read_bytes())
+    return digest.hexdigest()[:16]
+
+
+def site_is_complete(dst: Path, stamp: str) -> bool:
+    ready = dst / ".ready"
+    if not ready.exists() or not (dst / "index.html").exists():
+        return False
+    try:
+        if ready.read_text(encoding="utf-8").strip() != stamp:
+            return False
+    except OSError:
+        return False
+    return all((dst / rel).exists() for rel in REQUIRED_SITE_FILES)
+
+
 def ensure_site(src: Path, dst: Path) -> Path:
-    index = dst / "index.html"
-    if index.exists() and (dst / ".ready").exists():
-        return index
-    if dst.exists():
-        shutil.rmtree(dst, ignore_errors=True)
-    dst.mkdir(parents=True, exist_ok=True)
-    for name in SITE_FILES:
-        if (src / name).exists():
-            shutil.copy2(src / name, dst / name)
+    """解压站点；先写到临时目录再整体替换，任何中断都不会留下半成品。"""
+    stamp = build_id(src)
+    if site_is_complete(dst, stamp):
+        return dst / "index.html"
+
     data_src = src / "data"
     if not data_src.exists():
         raise FileNotFoundError("没找到 data 目录，exe 可能被破坏或不完整")
-    shutil.copytree(data_src, dst / "data", ignore=shutil.ignore_patterns("raw"))
-    (dst / ".ready").write_text(VERSION, encoding="utf-8")
-    return index
+
+    staging = dst.parent / (dst.name + ".staging")
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True, exist_ok=True)
+    for name in SITE_FILES:
+        if (src / name).exists():
+            shutil.copy2(src / name, staging / name)
+    shutil.copytree(data_src, staging / "data", ignore=shutil.ignore_patterns("raw"))
+    (staging / ".ready").write_text(stamp, encoding="utf-8")
+
+    if dst.exists():
+        shutil.rmtree(dst, ignore_errors=True)
+    staging.rename(dst)
+    return dst / "index.html"
 
 
 def root_dir() -> Path:
@@ -91,11 +132,39 @@ class Handler(SimpleHTTPRequestHandler):
     site_dir: Path = Path(".")
     data_dir: Path = Path(".")
     last_seen = time.time()
+    build = ""
+    repair_lock = threading.Lock()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(self.site_dir), **kwargs)
 
     # ---- helpers ---------------------------------------------------------
+    def _html(self, code: int, title: str, message: str) -> None:
+        body = (
+            "<!doctype html><meta charset='utf-8'><title>{t}</title>"
+            "<body style=\"font:15px/1.7 'Microsoft YaHei',system-ui;background:#0b0d12;color:#e8ecf5;padding:48px\">"
+            "<h2 style='color:#ff5d74'>{t}</h2><p>{m}</p></body>"
+        ).format(t=title, m=message).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _site_ready(self) -> bool:
+        return (self.site_dir / "index.html").exists()
+
+    def _repair_site(self) -> bool:
+        """站点文件缺失时（比如解压目录被清理）就地重新解压一次。"""
+        with self.repair_lock:
+            if self._site_ready():
+                return True
+            try:
+                ensure_site(bundle_root(), self.site_dir)
+            except Exception:  # noqa: BLE001 - 修不好就按失败处理
+                return False
+            return self._site_ready()
+
     def _json(self, code: int, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
@@ -136,6 +205,23 @@ class Handler(SimpleHTTPRequestHandler):
                 },
             )
             return
+        if path == "/__health":
+            self._json(
+                200,
+                {
+                    "ok": self._site_ready(),
+                    "mode": "exe",
+                    "version": VERSION,
+                    "build": Handler.build,
+                    "site": str(self.site_dir),
+                    "pid": os.getpid(),
+                },
+            )
+            return
+        if path == "/__quit":
+            self._json(200, {"ok": True, "pid": os.getpid()})
+            threading.Thread(target=self._delayed_shutdown, daemon=True).start()
+            return
         if path == "/__listing":
             files = []
             for item in sorted(self.data_dir.glob("anime-lists*.json")):
@@ -165,6 +251,15 @@ class Handler(SimpleHTTPRequestHandler):
         # 首页注入服务端信息，避免页面在 file:// 下做无谓探测
         if path in ("/", "/index.html"):
             index = self.site_dir / "index.html"
+            if not index.exists() and not self._repair_site():
+                self._html(
+                    500,
+                    "站点文件缺失",
+                    "解压目录里的站点文件不见了，自动修复也失败。<br>"
+                    f"目录：<code>{self.site_dir}</code><br>"
+                    "删掉这个目录后重新运行 exe 即可恢复。",
+                )
+                return
             if index.exists():
                 html = index.read_text(encoding="utf-8")
                 meta = {
@@ -210,6 +305,11 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
+    def _delayed_shutdown(self) -> None:
+        time.sleep(0.3)
+        STOP_EVENT.set()
+        self.server.shutdown()
+
     def log_message(self, *args):  # 静音
         return
 
@@ -226,6 +326,7 @@ class Server(ThreadingHTTPServer):
 def start_server(site: Path, data: Path):
     Handler.site_dir = site
     Handler.data_dir = data
+    Handler.build = build_id(bundle_root())
     Handler.last_seen = time.time()
     for port in PORT_CANDIDATES + (0,):
         try:
@@ -239,21 +340,38 @@ def start_server(site: Path, data: Path):
 
 
 def find_running() -> str | None:
-    """已经有一个实例在跑就复用它，别开第二个。"""
+    """已经有一个「健康」的实例在跑就复用它；坏掉的实例先请它退出。"""
     for port in PORT_CANDIDATES:
+        base = f"http://127.0.0.1:{port}"
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/__meta", timeout=1.2) as resp:
-                meta = json.loads(resp.read().decode("utf-8"))
-            if meta.get("mode") == "exe":
-                return f"http://127.0.0.1:{port}/"
+            with urllib.request.urlopen(base + "/__health", timeout=1.5) as resp:
+                health = json.loads(resp.read().decode("utf-8"))
         except Exception:  # noqa: BLE001 - 端口没人监听就是这种情况
             continue
+        if health.get("mode") != "exe":
+            continue
+        if health.get("ok") and health.get("version") == VERSION:
+            return base + "/"
+        # 版本不一致或站点文件缺失：让它退出，别把坏页面甩给用户
+        print(f"发现状态异常的旧实例（pid {health.get('pid')}），正在请它退出…", flush=True)
+        try:
+            urllib.request.urlopen(base + "/__quit", timeout=2).read()
+        except Exception:  # noqa: BLE001
+            pass
+        for _ in range(20):
+            time.sleep(0.25)
+            try:
+                urllib.request.urlopen(base + "/__health", timeout=0.6).close()
+            except Exception:  # noqa: BLE001
+                break
     return None
 
 
 def stop_when_idle(httpd) -> None:
     while True:
-        time.sleep(20)
+        if STOP_EVENT.wait(20):
+            httpd.shutdown()
+            return
         if time.time() - Handler.last_seen > IDLE_TIMEOUT:
             httpd.shutdown()
             return
@@ -280,7 +398,7 @@ def main() -> int:
         # 自测用：ANIME_LISTS_TEST_SECONDS=20 会让服务多活 20 秒再退出
         stay = int(os.environ.get("ANIME_LISTS_TEST_SECONDS", "0"))
         if stay > 0:
-            time.sleep(stay)
+            STOP_EVENT.wait(stay)
             httpd.shutdown()
         return 0
     try:

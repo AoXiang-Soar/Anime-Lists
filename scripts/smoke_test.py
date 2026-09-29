@@ -133,6 +133,7 @@ SCRIPT = r"""
   window.addEventListener('error', (e) => out.errors.push(String(e.message)));
 
   out.totalTitles = $('#totalCount').textContent.trim();
+  out.repoLink = ($('#repoLink') || {}).href || null;
   out.years = $$('.year-item').length;
   out.heatCells = $$('.heat-cell').length;
   out.viewTitle = $('#viewTitle').textContent;
