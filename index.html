@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>番剧年表 · 1990-2026 全量季度番清单</title>
+<meta name="description" content="1990 年至今全部季度番的完整清单，勾选你追过的番，直观看到属于自己的动画世代。">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='0.9em' font-size='90'%3E%F0%9F%93%BA%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">番</span>
+    <div>
+      <h1>番剧年表</h1>
+      <p>1990 - 2026 全部季度番清单<span id="totalCount"></span> · <span id="dataDate">数据加载中</span></p>
+    </div>
+  </div>
+  <div class="score">
+    <div class="score-main">
+      <strong id="watchedCount">0</strong>
+      <span>部已看</span>
+    </div>
+    <div class="score-sub">
+      <span id="watchedPercent">0%</span> 收录完成度 ·
+      <span id="watchedHours">0</span> 小时左右
+    </div>
+    <div class="score-bar"><i id="scoreBar"></i></div>
+  </div>
+  <div class="toolbar">
+    <button id="btnShare" class="btn primary" title="勾选状态全部写进链接，不需要任何本地存储">复制分享链接</button>
+    <button id="btnStarred" class="btn" title="查看收藏的补番列表">★ 补番列表 <b id="starCount">0</b></button>
+    <button id="btnUpdate" class="btn" title="超过一个月没更新时会自动联网拉取最新番剧">检查更新</button>
+    <button id="btnExport" class="btn">导出 JSON</button>
+    <button id="btnImport" class="btn">导入</button>
+    <button id="btnPoster" class="btn">生成海报</button>
+    <button id="btnClear" class="btn danger">清空</button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <section class="panel">
+      <h2>我的动画世代</h2>
+      <div id="eraSummary" class="era">
+        <p class="era-empty">勾选你看过的番，这里会分析出你属于哪个世代。</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>年份</h2>
+      <div id="yearList" class="year-list"></div>
+    </section>
+
+    <section class="panel">
+      <h2>自动保存 <span class="hint">默认开启</span></h2>
+      <label class="switch"><input type="checkbox" id="autosaveToggle" checked> 每次勾选 / 收藏后写入本地文件</label>
+      <div class="save-row">
+        <button id="btnBind" class="btn small" hidden>选择保存文件</button>
+        <span id="saveStatus" class="save-status">检查中…</span>
+      </div>
+      <p class="save-tip" id="saveTip"></p>
+    </section>
+
+    <section class="panel filters">
+      <h2>筛选</h2>
+      <input id="search" class="search" type="search" placeholder="搜索番名 / 假名 / 中文名…" autocomplete="off">
+      <div class="search-scope">
+        <label><input type="radio" name="scope" value="year" checked> 当前年份</label>
+        <label><input type="radio" name="scope" value="all"> 全部年份</label>
+      </div>
+
+      <h3>类型</h3>
+      <div id="formatFilters" class="chips"></div>
+
+      <h3>内容</h3>
+      <label class="switch"><input type="checkbox" id="hideShort"> 隐藏泡面番 / 短片（单集 &lt; 15 分钟）</label>
+      <label class="switch"><input type="checkbox" id="hideExtra"> 隐藏 OVA / SP 等非季度作品</label>
+      <label class="switch"><input type="checkbox" id="hideLong"> 隐藏长篇年番（≥ 45 集）</label>
+      <label class="switch"><input type="checkbox" id="hideEcchi"> 隐藏肉番 / 成人向</label>
+
+      <h3>排序</h3>
+      <select id="sort" class="select">
+        <option value="air">播出时间</option>
+        <option value="pop">热度</option>
+        <option value="score">评分</option>
+        <option value="fav">收藏数</option>
+        <option value="title">名称</option>
+      </select>
+
+      <h3>显示</h3>
+      <label class="switch"><input type="checkbox" id="onlyWatched"> 只看已勾选</label>
+      <label class="switch"><input type="checkbox" id="onlyStarred"> 只看补番收藏</label>
+      <label class="switch"><input type="checkbox" id="compact"> 紧凑模式</label>
+      <label class="switch"><input type="checkbox" id="showCovers" checked> 显示封面</label>
+    </section>
+  </aside>
+
+  <main class="content">
+    <section class="panel heat-panel">
+      <div class="heat-head">
+        <h2>年代热力图 <span class="hint">每格是一个季度，颜色越亮 = 那一季看得越多</span></h2>
+        <div class="heat-legend">
+          <span>少</span>
+          <i class="heat-0"></i><i class="heat-1"></i><i class="heat-2"></i><i class="heat-3"></i><i class="heat-4"></i>
+          <span>多</span>
+        </div>
+      </div>
+      <div class="heat-scroll">
+        <div id="heatmap" class="heatmap"></div>
+      </div>
+      <p class="heat-note">纵向自上而下依次是 冬 / 春 / 夏 / 秋，点一格即可跳到那一年。</p>
+    </section>
+
+    <div class="content-head">
+      <select id="yearSelect" class="select year-select" aria-label="选择年份"></select>
+      <div>
+        <h2 id="viewTitle">—</h2>
+        <p id="viewSub" class="sub"></p>
+      </div>
+      <div class="content-actions">
+        <button id="btnSelectSeason" class="btn small">标记当年全部季度</button>
+        <button id="btnClearSeason" class="btn small">取消当年</button>
+      </div>
+    </div>
+    <div id="seasons" class="seasons"></div>
+    <div id="emptyState" class="empty" hidden>没有符合条件的番剧，试试放宽筛选条件。</div>
+  </main>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<input id="importFile" type="file" accept="application/json,.json,.txt" hidden>
+
+<script defer src="data/index.js"></script>
+<script defer src="data/catalog.js"></script>
+<script defer src="app.js"></script>
+</body>
+</html>

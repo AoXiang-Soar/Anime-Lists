@@ -1,0 +1,6 @@
+# 源码统一用 LF，二进制文件不做转换
+* text=auto eol=lf
+*.exe binary
+*.png binary
+*.ico binary
+*.jpg binary

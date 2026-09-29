@@ -1,0 +1,20 @@
+# 个人追番记录：默认不上传（想跟着仓库同步就把这两行删掉）
+anime-lists-data.json
+anime-lists-*.json
+
+# 原始抓取缓存，可用 scripts/fetch_anilist.py 重新生成（约 16 MB）
+data/raw/
+
+# 构建 / 打包中间产物
+build/
+dist/*.spec
+*.log
+__pycache__/
+*.py[cod]
+
+# 编辑器与系统文件
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
